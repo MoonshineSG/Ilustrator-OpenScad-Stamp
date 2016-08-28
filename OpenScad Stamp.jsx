@@ -119,8 +119,16 @@ function main() {
   
   var strScadCode = "";
   
-  strScadCode += "$fa=0.01;\n";
-  strScadCode += "$fs=0.01;\n";
+  strScadCode += "$fa=0.1;\n";
+  strScadCode += "$fs=0.1;\n";
+  
+  strScadCode += "\n\n//========= Customizable Setttings ==========\n";
+  strScadCode += "letters_height_mm = 4;\n";
+  strScadCode += "base_height_mm = 1.2;\n";
+  strScadCode += "additional_skirt_mm = 4;\n\n";
+
+  strScadCode += "round_base = false;   //false=rectangular base\n";
+  strScadCode += "border_width_mm = 1.2; //set to 0 or negative to remove border\n";
   
   var shapes = [];
   
@@ -154,6 +162,7 @@ function main() {
     });
   });
 
+  strScadCode += "\n\n//========= data (don't modify) ==========\n";
   strScadCode += options.name + "_shapePoints=[\n\t" + shapes.map(function(shape){ return strPointsMm(shape.points); }).join(",\n\t") + "\n];\n";
   strScadCode += options.name + "_shapePaths=[\n\t" + shapes.map(function(shape){ return "[" + shape.paths.map(function(path){ return "[" + path.join(", ") + "]" }).join(", ") + "]"; }).join(",\n\t") + "\n];\n";
 
@@ -167,27 +176,40 @@ function main() {
     strScadCode += "}\n";
   });
 
-  strScadCode += "module " + options.name + "() {\n";
+  strScadCode += "module generate_text() {\n";
   shapes.forEach(function(shape, i) {
     strScadCode += "\t" + options.name + "_shape" + i + "();\n";
   });
   strScadCode += "}\n";
 
-  strScadCode += "height="+options.lettersHeight+";\n";
-  strScadCode += "base="+options.baseHeight+";\n";
-  strScadCode += "extra="+options.extra+";\n";
-
+  strScadCode += "\n\n//========= Computed Setttings (don't modify) ==========\n";  
   strScadCode += options.name + "_overallBounds=[" + strPointMm(bounds.min) + ", "+ strPointMm(bounds.max) +"];\n";
-  strScadCode += "length = " + options.name + "_overallBounds[1][0] - " + options.name + "_overallBounds[0][0]+extra;\n";
-  strScadCode += "width = " + options.name + "_overallBounds[1][1] - " + options.name + "_overallBounds[0][1]+extra;\n";
+  strScadCode += "overallLength = "+options.name+"_overallBounds[1][0] - "+options.name+"_overallBounds[0][0] + additional_skirt_mm ;\n";
+  strScadCode += "overallWidth = "+options.name+"_overallBounds[1][1] - "+options.name+"_overallBounds[0][1] + additional_skirt_mm;\n";
 
+  strScadCode += "\n\n//========= Main (don't modify) ==========\n";
   strScadCode += "mirror([1,0,0])\n";
   strScadCode += "{\n";
-  strScadCode += "\tlinear_extrude(height = height, convexity = 10)\n";
-  strScadCode += "\t"+options.name+"();\n";
-  strScadCode += "\ttranslate( [-extra/2, -extra/2, -base] )\n";
-  strScadCode += "\tcube([length, width, base]);\n";
+  strScadCode += "\tlinear_extrude(height = letters_height_mm, convexity = 10)\n";
+  strScadCode += "\tgenerate_text();\n";
+  strScadCode += "\tif (round_base) {\n";
+  strScadCode += "\t\tradius = sqrt(pow(overallLength,2) + pow(overallWidth, 2))/2 + border_width_mm;\n";
+  strScadCode += "\t\ttranslate( [(overallLength - additional_skirt_mm)/2, (overallWidth - additional_skirt_mm)/2, - base_height_mm] )\n";
+  strScadCode += "\t\tdifference() {\n";
+  strScadCode += "\t\t\tcylinder(h = base_height_mm + letters_height_mm, r1 = radius, r2 = radius);\n";
+  strScadCode += "\t\t\ttranslate( [0, 0, base_height_mm] )\n";
+  strScadCode += "\t\t\tcylinder(h = letters_height_mm + 0.1, r1 = radius - border_width_mm, r2 = radius - border_width_mm);\n";
+  strScadCode += "\t\t}\n";
+  strScadCode += "\t\} else {\n";
+  strScadCode += "\t\ttranslate( [-border_width_mm-additional_skirt_mm/2, -border_width_mm-additional_skirt_mm/2, -base_height_mm] )\n";
+  strScadCode += "\t\tdifference() {\n";
+  strScadCode += "\t\t\tcube([overallLength + border_width_mm * 2, overallWidth + border_width_mm * 2, base_height_mm + letters_height_mm]);\n";
+  strScadCode += "\t\t\ttranslate( [border_width_mm, border_width_mm, base_height_mm] )\n";
+  strScadCode += "\t\t\tcube([overallLength, overallWidth, letters_height_mm + 0.1]);\n";
+  strScadCode += "\t\t}\n";
+  strScadCode += "\t}\n";
   strScadCode += "}\n";
+ 
   
   var outputFile = new File((docRef.fullName.path || "~/Desktop") + "/" + options.name + ".scad").saveDlg('Save', 'OpenSCAD Documents:*.scad');
   if (outputFile) {
@@ -196,8 +218,9 @@ function main() {
     outputFile.lineFeed = "Unix";
     outputFile.write(strScadCode);
     outputFile.close();
-    
-    outputFile.execute();
+    if (options.run) {
+      outputFile.execute();
+    }
   }
   
   progressWindow.close();
@@ -229,42 +252,21 @@ function showOptionsDialog() {
   divisionLengthText.onChanging = function () { divisionLengthSlider.value = divisionLengthText.text; };
   divisionLengthSlider.onChanging = function () { divisionLengthText.text = divisionLengthSlider.value; };
   divisionLengthSlider.onChanging();
-  
-  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  // Generation Options Panel
-
-  var modePanel = w.add ("panel");
-  modePanel.text = "Generation Options";
-  
-  var letterGroup = modePanel.add ("group");
-  letterGroup.add ('statictext {text: "Letter Height (mm) :", characters: 25}');
-  var lettersHeight = letterGroup.add ('edittext {text: 6, characters: 4, justify: "center"}');
-
-  var baseGroup = modePanel.add ("group");
-  baseGroup.add ('statictext {text: "Base Height (mm) :", characters: 25}');
-  var baseHeight = baseGroup.add ('edittext {text: 1.2, characters: 4, justify: "center"}');
-
-  var extraGroup = modePanel.add ("group");
-  extraGroup.add ('statictext {text: "Additional size for base (mm) :", characters: 25}');
-  var extra = extraGroup.add ('edittext {text: 4, characters: 4, justify: "center"}');
-  
-  
-  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+ 
   // Button Panel
   var buttonPanel = w.add ("group");
   buttonPanel.orientation = "row";
   buttonPanel.add ("button", undefined, "OK");
   buttonPanel.add ("button", undefined, "Cancel");
-
+  var run = buttonPanel.add ('checkbox', undefined, "Open after save");
+  run.value = true;
+  
   if (w.show() != 1) return null;
   
   return {
     name: infoName.text,
     divisionLength: mmToCoord(divisionLengthSlider.value),
-    lettersHeight: lettersHeight.text,
-    baseHeight: baseHeight.text,
-    extra: extra.text
-
+    run: run.value,
   };
 }
 
